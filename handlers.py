@@ -64,7 +64,7 @@ async def clarification_handler(message: types.Message, state: FSMContext):
             f"<b>Цена:</b> {product['price']} руб."
         )
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    await message.answer("Если ещё что-то ищите, напишите.")
+    await message.answer("Если ещё что-то ищите, напишите 👇")
     # Сбрасываем состояние после успешного поиска
     await state.clear()
 
@@ -111,6 +111,7 @@ async def initial_query_handler(message: types.Message, state: FSMContext):
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     # В данном примере блок дополнительного уточнения закомментирован
     # Если нужно добавить дополнительное уточнение, можно раскомментировать соответствующий блок ниже
+    await message.answer("Если ещё что-то ищите, напишите 👇")
     """
     if random.random() < 0.3:
         await state.update_data(original_query=query, accumulated_clarification="")

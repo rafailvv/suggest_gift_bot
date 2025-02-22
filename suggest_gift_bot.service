@@ -1,0 +1,8 @@
+[Service]
+User=root
+WorkingDirectory=/home/suggest_gift_bot
+ExecStart=/home/suggest_gift_bot/venv/bin/python3 main.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
