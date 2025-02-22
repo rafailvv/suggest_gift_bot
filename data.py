@@ -39,6 +39,8 @@ class ProductSearch:
             })
         # Если максимальная оценка похожести ниже порога, требуется уточнение запроса
         need_clarification = similarities.max() < threshold
+        if similarities.max() >= 0.45:
+            results=results[:1]
         return results, need_clarification
 
 

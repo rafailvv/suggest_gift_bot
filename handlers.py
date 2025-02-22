@@ -103,7 +103,7 @@ async def initial_query_handler(message: types.Message, state: FSMContext):
             [InlineKeyboardButton(text="Перейти", url=product['link'])]
         ])
         text = (
-            f"<b>{product['name']}</b>\n"
+            f"<b>{product['name']}</b>\n\n"
             f"Категория: {product['category']}\n\n"
             f"{product['description']}\n\n"
             f"Цена: {product['price']}"
