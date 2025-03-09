@@ -20,14 +20,14 @@ class ProductSearch:
         self.df['price'] = self.df['price'].str.replace(',', '.')
         # Преобразуем цену к числовому значению, некорректные значения становятся NaN
         self.df['price'] = pd.to_numeric(self.df['price'], errors='coerce')
-        # Если нужно, можно удалить записи с отсутствующей ценой
+        # Удаляем записи с отсутствующей ценой
         self.df = self.df[self.df['price'].notnull()]
 
         # Объединяем название, описание и категорию для поиска
         self.df['text'] = (
-                self.df['name'].fillna('') + " " +
-                self.df['description'].fillna('') + " " +
-                self.df['category'].fillna('')
+            self.df['name'].fillna('') + " " +
+            self.df['description'].fillna('') + " " +
+            self.df['category'].fillna('')
         )
         # Создаем TF-IDF матрицу с использованием русского списка стоп-слов
         self.vectorizer = TfidfVectorizer(stop_words=russian_stopwords)
@@ -52,11 +52,9 @@ class ProductSearch:
             if not price_mask.any():
                 # Если нет товаров с подходящей ценой, возвращаем пустой список
                 return [], True
-            # Выбираем индексы товаров, удовлетворяющих условию
             filtered_indices = self.df.index[price_mask]
             # Вычисляем похожесть только для отфильтрованных товаров
             similarities = cosine_similarity(query_vec, self.tfidf_matrix[filtered_indices]).flatten()
-            # Сопоставляем вычисленные похожести с исходными индексами
             sorted_idx = similarities.argsort()[::-1][:top_n]
             result_indices = filtered_indices[sorted_idx]
         else:
@@ -68,22 +66,34 @@ class ProductSearch:
         results = []
         for idx in result_indices:
             product = self.df.loc[idx]
-            # Если цена отсутствует, можем пропускать или оставлять значение None
+            # Получаем соответствующий score
+            score = similarities[sorted_idx[list(result_indices).index(idx)]]
             results.append({
                 'name': product['name'],
                 'category': product['category'],
                 'description': product['description'],
                 'price': product['price'],
                 'link': product['link'],
-                'score': similarities[sorted_idx[list(result_indices).index(idx)]]
+                'score': score
             })
 
-        # Если максимальная оценка похожести ниже порога, требуется уточнение запроса
-        overall_max_score = similarities.max() if len(similarities) > 0 else 0
-        need_clarification = overall_max_score < threshold
-        # Если максимальная оценка больше или равна 0.45, возвращаем только лучший результат
-        if overall_max_score >= 0.45:
+        # Фильтруем результаты: убираем товары с score ниже порога
+        results = [r for r in results if r['score'] >= threshold]
+
+        # Если после фильтрации результатов не осталось, возвращаем пустой список и флаг уточнения
+        if not results:
+            return [], True
+
+        # Если максимальный score среди оставшихся товаров >= 0.45, возвращаем только лучший результат
+        max_score = max(r['score'] for r in results)
+        if max_score >= 0.45:
+            results = sorted(results, key=lambda x: x['score'], reverse=True)
             results = results[:1]
+
+        # Определяем, требуется ли уточнение запроса, если максимум ниже threshold
+        overall_max_score = max(r['score'] for r in results) if results else 0
+        need_clarification = overall_max_score < threshold
+
         return results, need_clarification
 
 
