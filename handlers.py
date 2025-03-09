@@ -1,13 +1,33 @@
+import os
+import csv
 import random
+import datetime
 from aiogram import Router, types
-from aiogram.filters import CommandStart
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.filters import CommandStart, Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
 from data import product_search_instance
 
 router = Router()
+
+# Путь к файлу логирования сессий
+SESSIONS_LOG_FILE = "sessions.csv"
+
+# Инициализация CSV-файла (запись заголовка, если файл не существует)
+if not os.path.exists(SESSIONS_LOG_FILE):
+    with open(SESSIONS_LOG_FILE, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "user_id", "username", "event", "text"])
+
+
+def log_session(user: types.User, event: str, text: str):
+    """Записывает событие сессии в CSV-файл."""
+    timestamp = datetime.datetime.now().isoformat(sep=" ", timespec="seconds")
+    with open(SESSIONS_LOG_FILE, mode="a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([timestamp, user.id, user.username or "", event, text])
 
 
 class QueryState(StatesGroup):
@@ -18,7 +38,44 @@ class QueryState(StatesGroup):
 @router.message(CommandStart())
 async def start_command(message: types.Message, state: FSMContext):
     await state.clear()
+    log_session(message.from_user, "start", message.text)
     await message.answer("Привет! Напиши, что ты ищешь")
+
+# Команда /sessions для выгрузки данных сессий в формате таблицы
+@router.message(Command("sessions"))
+async def sessions_handler(message: types.Message):
+    # Для безопасности можно добавить проверку: только администратор бота может использовать эту команду.
+    # Например, проверка по ID пользователя:
+    # if message.from_user.id != ADMIN_ID:
+    #     await message.answer("Нет доступа")
+    #     return
+
+    if not os.path.exists(SESSIONS_LOG_FILE):
+        await message.answer("Данных о сессиях пока нет.")
+        return
+
+    with open(SESSIONS_LOG_FILE, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    if not rows:
+        await message.answer("Данных о сессиях пока нет.")
+        return
+
+    # Форматируем данные в виде таблицы (используем тег <pre> для моноширинного шрифта)
+    table_lines = []
+    for row in rows:
+        # Присоединяем элементы строки через табуляцию
+        table_lines.append("\t".join(row))
+    table_text = "\n".join(table_lines)
+
+    temp_filename = "sessions_export.txt"
+    with open(temp_filename, "w", encoding="utf-8") as f:
+        f.write(table_text)
+    await message.answer_document(FSInputFile(temp_filename))
+    os.remove(temp_filename)
+
+
 
 # Обработчик ответа на уточняющий вопрос (состояние waiting_for_clarification)
 @router.message(QueryState.waiting_for_clarification)
@@ -36,6 +93,7 @@ async def clarification_handler(message: types.Message, state: FSMContext):
 
     combined_query = f"{original_query} {new_accumulated}"
     await state.update_data(accumulated_clarification=new_accumulated)
+    log_session(message.from_user, "clarification", f"Original: {original_query} | New: {new_input}")
 
     results, need_clarification = product_search_instance.search(combined_query)
 
@@ -64,6 +122,7 @@ async def clarification_handler(message: types.Message, state: FSMContext):
             f"<b>Цена:</b> {product['price']} руб."
         )
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        log_session(message.from_user, "result_sent", f"Product: {product['name']} | Price: {product['price']}")
     await message.answer("Если ещё что-то ищите, напишите 👇")
     # Сбрасываем состояние после успешного поиска
     await state.clear()
@@ -77,6 +136,7 @@ async def initial_query_handler(message: types.Message, state: FSMContext):
         return
 
     query = message.text
+    log_session(message.from_user, "query", query)
     results, need_clarification = product_search_instance.search(query)
 
     # Если товаров недостаточно найдено – переходим в режим уточнения
@@ -109,15 +169,14 @@ async def initial_query_handler(message: types.Message, state: FSMContext):
             f"Цена: {product['price']}"
         )
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    # В данном примере блок дополнительного уточнения закомментирован
-    # Если нужно добавить дополнительное уточнение, можно раскомментировать соответствующий блок ниже
+        log_session(message.from_user, "result_sent", f"Product: {product['name']} | Price: {product['price']}")
     await message.answer("Если ещё что-то ищите, напишите 👇")
     """
     if random.random() < 0.3:
         await state.update_data(original_query=query, accumulated_clarification="")
         clarifying_texts = [
             "Уточните, какие параметры для вас особенно важны (например, материал, цвет, размер или бренд)?",
-            "Можете рассказать подробнее, что именно вас интересует? Возможно, указать дополнительные характеристики или желаемый ценовой диапазон.,
+            "Можете рассказать подробнее, что именно вас интересует? Возможно, указать дополнительные характеристики или желаемый ценовой диапазон.",
             "Для более точного подбора товара укажите, пожалуйста, дополнительные детали: стиль, функциональность или конкретные особенности",
             "Опишите, пожалуйста, дополнительные параметры, такие как качество, бренд или особенности дизайна",
             "Поделитесь, пожалуйста, более детальной информацией: какие критерии (например, цвет, материал, функционал) для вас являются решающими?"
@@ -126,3 +185,5 @@ async def initial_query_handler(message: types.Message, state: FSMContext):
         await state.set_state(QueryState.waiting_for_clarification)
         await message.answer(clarifying_question)
     """
+
+
