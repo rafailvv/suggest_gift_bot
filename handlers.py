@@ -225,8 +225,11 @@ async def update_dataset_command(message: types.Message, state: FSMContext):
     await message.answer("Пришлите, пожалуйста, новый файл dataset.csv.")
 
 # Обработчик получения файла для обновления dataset.csv
-@router.message(DatasetState.waiting_for_dataset, content_types=types.ContentType.DOCUMENT)
+@router.message(DatasetState.waiting_for_dataset)
 async def update_dataset_handler(message: types.Message, state: FSMContext):
+    if not message.document:
+        await message.answer("Пожалуйста, отправьте файл с именем dataset.csv.")
+        return
     document = message.document
     if document.file_name != "dataset.csv":
         await message.answer("Пожалуйста, отправьте файл с именем dataset.csv.")
