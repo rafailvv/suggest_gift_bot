@@ -136,7 +136,7 @@ async def popular_products_handler(message: types.Message):
             f"<b>Категория:</b> {product['category']}\n\n"
             f"{product['description']}\n\n"
             f"<b>Цена:</b> {product['price']} руб.\n"
-            f"<b>Популярность:</b> {product['count']}"
+            f"<b>Количество запросов:</b> {product['count']}"
         )
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
