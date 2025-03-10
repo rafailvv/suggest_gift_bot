@@ -4,8 +4,7 @@ import random
 import datetime
 from aiogram import Router, types, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, FSInputFile, KeyboardButton, \
-    ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, FSInputFile, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.utils.formatting import Text
@@ -119,6 +118,99 @@ async def sessions_handler(message: types.Message):
     await message.answer_document(FSInputFile(temp_filename))
     os.remove(temp_filename)
 
+# Команда для отображения агрегированной статистики
+@router.message(Command("stats"))
+async def stats_handler(message: types.Message):
+    """
+    Команда для менеджера: выводит агрегированную статистику по запросам и рекомендациям.
+    Рекомендациями, не приведшими к покупке, считаются случаи, когда по запросу не было отправлено результатов.
+    """
+    if not os.path.exists(SESSIONS_LOG_FILE):
+        await message.answer("Нет данных для статистики.")
+        return
+
+    event_counts = {}
+    with open(SESSIONS_LOG_FILE, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            event = row["event"]
+            event_counts[event] = event_counts.get(event, 0) + 1
+
+    query_count = event_counts.get("query", 0)
+    result_sent_count = event_counts.get("result_sent", 0)
+    non_conversions = query_count - result_sent_count
+
+    stats_text = [
+        "<b>Статистика по сессиям:</b>",
+        f"<b>Старт сессии (start):</b> {event_counts.get('start', 0)}",
+        f"<b>Запросы (query):</b> {query_count}",
+        f"<b>Уточнения (clarification):</b> {event_counts.get('clarification', 0)}",
+        f"<b>Отправленные рекомендации (result_sent):</b> {result_sent_count}",
+    ]
+
+    await message.answer("\n".join(stats_text), parse_mode="HTML")
+
+# Новая команда для вывода конкретных запросов, по которым не были отправлены рекомендации
+@router.message(Command("failed_queries"))
+async def failed_queries_handler(message: types.Message):
+    """
+    Команда для менеджера: выводит список конкретных запросов,
+    по которым не были отправлены рекомендации (нет события result_sent после запроса).
+    """
+    if not os.path.exists(SESSIONS_LOG_FILE):
+        await message.answer("Нет данных для анализа.")
+        return
+
+    # Читаем логи и группируем события по пользователям
+    user_events = {}
+    with open(SESSIONS_LOG_FILE, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            user_id = row["user_id"]
+            # Преобразуем timestamp в datetime
+            try:
+                ts = datetime.datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            row["timestamp_dt"] = ts
+            user_events.setdefault(user_id, []).append(row)
+
+    non_conversion_queries = []
+    # Для каждого пользователя проходим по событиям в хронологическом порядке
+    for user_id, events in user_events.items():
+        events = sorted(events, key=lambda r: r["timestamp_dt"])
+        i = 0
+        while i < len(events):
+            event = events[i]
+            if event["event"] == "query":
+                query_event = event
+                # Определяем временной интервал до следующего запроса от того же пользователя
+                j = i + 1
+                conversion_found = False
+                while j < len(events) and events[j]["event"] != "query":
+                    if events[j]["event"] == "result_sent":
+                        conversion_found = True
+                        break
+                    j += 1
+                if not conversion_found:
+                    non_conversion_queries.append(query_event)
+            i += 1
+
+    if not non_conversion_queries:
+        await message.answer("Все запросы привели к отправке рекомендаций.")
+        return
+
+    # Формируем текстовое сообщение с конкретными запросами
+    lines = ["<b>Запросы без отправленных рекомендаций:</b>"]
+    for q in non_conversion_queries:
+        timestamp = q["timestamp"]
+        user_id = q["user_id"]
+        username = q["username"] if q["username"] else "N/A"
+        query_text = q["text"]
+        lines.append(f"{timestamp} | User: {user_id} ({username}) | Запрос: {query_text}")
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
 # Обработчик для отображения популярных товаров по нажатию кнопки
 @router.message(F.text == "Популярные товары")
 async def popular_products_handler(message: types.Message):
@@ -184,7 +276,6 @@ async def clarification_handler(message: types.Message, state: FSMContext):
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
         log_session(message.from_user, "result_sent", f"Product: {product['name']} | Price: {product['price']}")
     # Добавляем кнопку для отображения популярных товаров
-
     await message.answer("Если ещё что-то ищите, напишите 👇")
     await state.clear()
 
