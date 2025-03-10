@@ -234,7 +234,7 @@ async def update_dataset_handler(message: types.Message, state: FSMContext):
     if document.file_name != "dataset.csv":
         await message.answer("Пожалуйста, отправьте файл с именем dataset.csv.")
         return
-    await message.bot.download_file_by_id(document.file_id, destination=DATASET_FILE)
+    await message.bot.download_file(document.file_id, destination=DATASET_FILE)
     await message.answer("Файл dataset.csv успешно обновлен.")
     await state.clear()
 
