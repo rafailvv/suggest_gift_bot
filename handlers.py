@@ -93,7 +93,7 @@ async def start_command(message: types.Message, state: FSMContext):
     await state.clear()
     log_session(message.from_user, "start", message.text)
     popular_button = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="Популярные товары")]
+        [KeyboardButton(text="Популярные товары"), KeyboardButton(text="Скидочные товары") ]
     ], resize_keyboard=True)
     await message.answer("Привет! Напиши, что ты ищешь", reply_markup=popular_button)
 
@@ -256,6 +256,31 @@ async def popular_products_handler(message: types.Message):
             f"{product['description']}\n\n"
             f"<b>Цена:</b> {product['price']} руб.\n"
             f"<b>Количество запросов:</b> {product['count']}"
+        )
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+@router.message(F.text == "Скидочные товары")
+async def discounted_products_handler(message: types.Message):
+    df = product_search_instance.df  # датафрейм, загруженный при инициализации ProductSearch
+    if df.empty:
+        await message.answer("Нет товаров в dataset.")
+        return
+    # Выбираем случайные 3 товара (или меньше, если товаров меньше 3)
+    sample_products = df.sample(n=min(3, len(df)))
+    for index, product in sample_products.iterrows():
+        original_price = product['price']
+        discount_percent = random.randint(10, 30)  # случайная скидка от 10% до 30%
+        discounted_price = round(original_price * (1 - discount_percent / 100), 2)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Перейти", url=product['link'])]
+        ])
+        text = (
+            f"<b>{product['name']}</b>\n\n"
+            f"<b>Категория:</b> {product['category']}\n\n"
+            f"{product['description']}\n\n"
+            f"<b>Старая цена:</b> {original_price} руб.\n"
+            f"<b>Скидка:</b> {discount_percent}%\n"
+            f"<b>Новая цена:</b> {discounted_price} руб."
         )
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
