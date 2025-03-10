@@ -13,9 +13,10 @@ from data import product_search_instance
 
 router = Router()
 
-# Пути к файлам логирования сессий и популярности товаров
+# Пути к файлам логирования сессий, популярности товаров и dataset
 SESSIONS_LOG_FILE = "sessions.csv"
 POPULAR_PRODUCTS_FILE = "popular_products.csv"
+DATASET_FILE = "dataset.csv"
 
 # Инициализация CSV-файлов (если не существуют)
 if not os.path.exists(SESSIONS_LOG_FILE):
@@ -84,6 +85,9 @@ def get_top_popular_products(top_n=3):
 class QueryState(StatesGroup):
     waiting_for_clarification = State()
 
+class DatasetState(StatesGroup):
+    waiting_for_dataset = State()
+
 @router.message(CommandStart())
 async def start_command(message: types.Message, state: FSMContext):
     await state.clear()
@@ -138,7 +142,6 @@ async def stats_handler(message: types.Message):
 
     query_count = event_counts.get("query", 0)
     result_sent_count = event_counts.get("result_sent", 0)
-    non_conversions = query_count - result_sent_count
 
     stats_text = [
         "<b>Статистика по сессиям:</b>",
@@ -150,7 +153,7 @@ async def stats_handler(message: types.Message):
 
     await message.answer("\n".join(stats_text), parse_mode="HTML")
 
-# Новая команда для вывода конкретных запросов, по которым не были отправлены рекомендации
+# Команда для вывода конкретных запросов, по которым не были отправлены рекомендации
 @router.message(Command("failed_queries"))
 async def failed_queries_handler(message: types.Message):
     """
@@ -167,7 +170,6 @@ async def failed_queries_handler(message: types.Message):
         reader = csv.DictReader(f)
         for row in reader:
             user_id = row["user_id"]
-            # Преобразуем timestamp в datetime
             try:
                 ts = datetime.datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S")
             except ValueError:
@@ -176,7 +178,6 @@ async def failed_queries_handler(message: types.Message):
             user_events.setdefault(user_id, []).append(row)
 
     non_conversion_queries = []
-    # Для каждого пользователя проходим по событиям в хронологическом порядке
     for user_id, events in user_events.items():
         events = sorted(events, key=lambda r: r["timestamp_dt"])
         i = 0
@@ -184,7 +185,6 @@ async def failed_queries_handler(message: types.Message):
             event = events[i]
             if event["event"] == "query":
                 query_event = event
-                # Определяем временной интервал до следующего запроса от того же пользователя
                 j = i + 1
                 conversion_found = False
                 while j < len(events) and events[j]["event"] != "query":
@@ -200,7 +200,6 @@ async def failed_queries_handler(message: types.Message):
         await message.answer("Все запросы привели к отправке рекомендаций.")
         return
 
-    # Формируем текстовое сообщение с конкретными запросами
     lines = ["<b>Запросы без отправленных рекомендаций:</b>"]
     for q in non_conversion_queries:
         timestamp = q["timestamp"]
@@ -210,6 +209,31 @@ async def failed_queries_handler(message: types.Message):
         lines.append(f"{timestamp} | User: {user_id} ({username}) | Запрос: {query_text}")
 
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+# Команда для получения файла dataset.csv
+@router.message(Command("get_dataset"))
+async def get_dataset_handler(message: types.Message):
+    if not os.path.exists(DATASET_FILE):
+        await message.answer("Файл dataset.csv не найден.")
+        return
+    await message.answer_document(FSInputFile(DATASET_FILE))
+
+# Команда для обновления файла dataset.csv (режим ожидания файла)
+@router.message(Command("update_dataset"))
+async def update_dataset_command(message: types.Message, state: FSMContext):
+    await state.set_state(DatasetState.waiting_for_dataset)
+    await message.answer("Пришлите, пожалуйста, новый файл dataset.csv.")
+
+# Обработчик получения файла для обновления dataset.csv
+@router.message(DatasetState.waiting_for_dataset, content_types=types.ContentType.DOCUMENT)
+async def update_dataset_handler(message: types.Message, state: FSMContext):
+    document = message.document
+    if document.file_name != "dataset.csv":
+        await message.answer("Пожалуйста, отправьте файл с именем dataset.csv.")
+        return
+    await document.download(destination=DATASET_FILE)
+    await message.answer("Файл dataset.csv успешно обновлен.")
+    await state.clear()
 
 # Обработчик для отображения популярных товаров по нажатию кнопки
 @router.message(F.text == "Популярные товары")
@@ -275,7 +299,6 @@ async def clarification_handler(message: types.Message, state: FSMContext):
         )
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
         log_session(message.from_user, "result_sent", f"Product: {product['name']} | Price: {product['price']}")
-    # Добавляем кнопку для отображения популярных товаров
     await message.answer("Если ещё что-то ищите, напишите 👇")
     await state.clear()
 
